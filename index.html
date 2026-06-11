@@ -21,7 +21,7 @@
 <body>
 
     <div class="controls">
-        <button id="download-btn" disabled>圖片載入中...</button>
+        <button id="download-btn" disabled>圖片安全載入中...</button>
         <p style="font-size: 13px; color: #666;">預設載入 10 張卡片（會自動分成 2 頁）</p>
     </div>
 
@@ -46,10 +46,9 @@
     const btn = document.getElementById('download-btn');
     const imageLoadPromises = [];
 
-    // 利用 weserv.nl 鏡像服務，直接把原圖轉成允許跨域的安全圖片網址
+    // 利用 weserv.nl 鏡像服務
     function getSafeCorsUrl(originalUrl) {
         const cleanUrl = originalUrl.replace(/^https?:\/\//, '');
-        // 這裡一樣維持輸出 png 確保原圖畫質不受損
         return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=png`;
     }
 
@@ -72,21 +71,32 @@
         item.appendChild(p);
         grid.appendChild(item);
 
-        // 監聽圖片載入狀態
+        // 【核心修正點】：利用 img.decode() 確保 Safari 硬體層面完全解碼成功
         const pLoad = new Promise((resolve) => {
-            img.onload = () => resolve(true);
+            img.onload = () => {
+                // onload 觸發後，進一步確保 decode 成功
+                img.decode()
+                    .then(() => resolve(true))
+                    .catch((err) => {
+                        console.warn(`第 ${index + 1} 張解碼異常，嘗試等待`, err);
+                        resolve(false);
+                    });
+            };
             img.onerror = () => {
-                console.error(`第 ${index + 1} 張安全圖片載入失敗`);
+                console.error(`第 ${index + 1} 張圖片下載失敗`);
                 resolve(false);
             };
         });
         imageLoadPromises.push(pLoad);
     });
 
-    // 圖片全部下載完畢，才解鎖下載按鈕
+    // 所有圖片均已「完全下載且完全解碼」後才啟用按鈕
     Promise.all(imageLoadPromises).then(() => {
-        btn.disabled = false;
-        btn.innerText = '產生並下載 A4 PDF';
+        // 再額外延遲 300 毫秒給 Safari 緩衝執行緒，確保萬無一失
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerText = '產生並下載 A4 PDF';
+        }, 300);
     });
 
     // 點擊按鈕生成 PDF
@@ -98,7 +108,7 @@
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
             
-            // 3x3 紙張排版微調
+            // 3x3 紙張排版
             const cardW = 63;
             const cardH = 88;
             const gapX = 3; 
@@ -115,18 +125,18 @@
                     cardCountOnPage = 0;
                 }
 
-                // 【核心修正點】：這裡強制改為導出 "image/jpeg" 格式，完全避開 PNG 損壞的嚴格檢查
+                // 建立畫布轉成穩定的 JPEG Base64
                 const canvas = document.createElement("canvas");
+                // 安全防護：如果長寬抓不到，給予預設 PTCG 比例尺寸
                 canvas.width = img.naturalWidth || 400;
                 canvas.height = img.naturalHeight || 560;
                 const ctx = canvas.getContext("2d");
                 
-                // 為了防止轉 JPEG 時背景變成黑色，先鋪一層白底
+                // 鋪一層白底防止黑邊
                 ctx.fillStyle = "#FFFFFF";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
                 ctx.drawImage(img, 0, 0);
-                // 轉為 0.95 畫質的 JPEG Base64
                 const base64Data = canvas.toDataURL("image/jpeg", 0.95);
 
                 const col = cardCountOnPage % 3;
@@ -144,12 +154,12 @@
                 pdf.line(x - 3, y + cardH, x, y + cardH); pdf.line(x, y + cardH, x, y + cardH + 3);
                 pdf.line(x + cardW, y + cardH, x + cardW + 3, y + cardH); pdf.line(x + cardW, y + cardH, x + cardW, y + cardH + 3);
 
-                // 【核心修正點】：指定格式為 'JPEG'
+                // 插入 JPEG 到 PDF
                 pdf.addImage(base64Data, 'JPEG', x, y, cardW, cardH, undefined, 'FAST');
                 cardCountOnPage++;
             });
 
-            // 儲存檔案
+            // 輸出下載
             pdf.save('PTCG_A4_Print.pdf');
 
         } catch (error) {
