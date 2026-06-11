@@ -14,7 +14,6 @@
         
         .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; max-width: 800px; margin: 0 auto; padding: 10px; }
         .card-item { background: white; padding: 8px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        /* 關鍵：設定 img 的 crossOrigin，並允許透過 canvas 讀取 */
         .card-item img { width: 100%; height: auto; border-radius: 6px; display: block; }
         .card-item p { margin: 8px 0 0; font-size: 12px; color: #666; font-weight: bold; }
     </style>
@@ -29,7 +28,7 @@
     <div class="card-grid" id="selected-cards"></div>
 
 <script>
-    // 卡牌網址清單
+    // 原始卡牌網址清單
     const sampleCards = [
         { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
         { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
@@ -45,19 +44,26 @@
 
     const grid = document.getElementById('selected-cards');
     const btn = document.getElementById('download-btn');
-    
-    // 用來記錄所有圖片是否載入完成的 Promise 陣列
     const imageLoadPromises = [];
 
-    // 動態生成帶有 crossOrigin 的圖片
+    // 關鍵優化：利用 weserv.nl 鏡像服務，直接把原圖轉成允許跨域的安全圖片網址
+    function getSafeCorsUrl(originalUrl) {
+        // 去掉 https:// 避免部分解析問題，並強制輸出為 png
+        const cleanUrl = originalUrl.replace(/^https?:\/\//, '');
+        return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=png`;
+    }
+
+    // 動態生成網頁圖片
     sampleCards.forEach((card, index) => {
         const item = document.createElement('div');
         item.className = 'card-item';
         
         const img = document.createElement('img');
-        // 加上不帶憑證的跨域宣告，讓瀏覽器允許讀取快取
+        // 核心改動：畫面上預覽與後續 PDF 下載都統一改用經過代理安全封裝的網址
+        const safeUrl = getSafeCorsUrl(card.url);
+        
         img.crossOrigin = 'anonymous'; 
-        img.src = card.url;
+        img.src = safeUrl;
         img.alt = `card-${index}`;
         
         const p = document.createElement('p');
@@ -67,38 +73,37 @@
         item.appendChild(p);
         grid.appendChild(item);
 
-        // 監聽每張圖片的載入狀態
+        // 監聽圖片載入狀態
         const pLoad = new Promise((resolve) => {
             img.onload = () => resolve(true);
             img.onerror = () => {
-                // 如果官方硬封鎖，則使用最穩定的基礎 base64 替換，確保不卡死
-                console.warn(`第 ${index + 1} 張圖片加載失敗，切換備用模式`);
+                console.error(`第 ${index + 1} 張安全圖片載入失敗`);
                 resolve(false);
             };
         });
         imageLoadPromises.push(pLoad);
     });
 
-    // 當畫面上所有圖片都 ready 後，才啟用按鈕
+    // 圖片全部下載完畢（在畫面上看得到圖了），才解鎖下載按鈕
     Promise.all(imageLoadPromises).then(() => {
         btn.disabled = false;
         btn.innerText = '產生並下載 A4 PDF';
     });
 
-    // 點擊下載按鈕：直接從 DOM 抽取快取資料，不再發送網路請求
+    // 點擊按鈕生成 PDF
     btn.addEventListener('click', () => {
         btn.disabled = true;
-        btn.innerText = '正在輸出 PDF...';
+        btn.innerText = '正在處理 PDF 排版...';
 
         try {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
             
-            // 3x3 數學排版參數
+            // 3x3 紙張排版微調
             const cardW = 63;
             const cardH = 88;
-            const gapX = 4;
-            const gapY = 4;
+            const gapX = 3; // 縮小一點點間距，確保邊框與裁切線不超出 A4 邊界
+            const gapY = 3;
             const startX = (210 - (cardW * 3 + gapX * 2)) / 2;
             const startY = (297 - (cardH * 3 + gapY * 2)) / 2;
 
@@ -111,17 +116,17 @@
                     cardCountOnPage = 0;
                 }
 
-                // 直接用畫面上載入好的 img 節點轉 base64，完全不走網路
+                // 將已經在網頁上安全顯示出來的 Canvas 區塊轉成 Base64
                 let base64Data;
                 try {
                     const canvas = document.createElement("canvas");
-                    canvas.width = img.naturalWidth || img.width || 400;
-                    canvas.height = img.naturalHeight || img.height || 560;
+                    canvas.width = img.naturalWidth || 400;
+                    canvas.height = img.naturalHeight || 560;
                     const ctx = canvas.getContext("2d");
                     ctx.drawImage(img, 0, 0);
                     base64Data = canvas.toDataURL("image/png");
                 } catch (e) {
-                    // 萬一不幸依然觸發 Tainted canvas 安全機制，改用原本的 src (jsPDF 內部會嘗試解析)
+                    // 若有萬一，直接傳安全 URL 給 jsPDF 解析
                     base64Data = img.src;
                 }
 
@@ -131,7 +136,7 @@
                 const x = startX + col * (cardW + gapX);
                 const y = startY + row * (cardH + gapY);
 
-                // 繪製灰色十字裁切線 (外邊延伸 3mm)
+                // 繪製灰色十字裁切線
                 pdf.setDrawColor(180, 180, 180);
                 pdf.setLineWidth(0.1);
                 
@@ -140,16 +145,17 @@
                 pdf.line(x - 3, y + cardH, x, y + cardH); pdf.line(x, y + cardH, x, y + cardH + 3);
                 pdf.line(x + cardW, y + cardH, x + cardW + 3, y + cardH); pdf.line(x + cardW, y + cardH, x + cardW, y + cardH + 3);
 
-                // 塞入 PDF
+                // 塞入 PDF 中
                 pdf.addImage(base64Data, 'PNG', x, y, cardW, cardH, undefined, 'FAST');
                 cardCountOnPage++;
             });
 
+            // 儲存檔案
             pdf.save('PTCG_A4_Print.pdf');
 
         } catch (error) {
             console.error(error);
-            alert('PDF 產生失敗：' + error.message);
+            alert('PDF 生成失敗：' + error.message);
         } finally {
             btn.disabled = false;
             btn.innerText = '產生並下載 A4 PDF';
