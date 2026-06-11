@@ -5,104 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PTCG 卡牌列印助手</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; margin: 0; }
-        .controls { margin-bottom: 20px; text-align: center; }
-        button { background: #007aff; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; margin: 0; text-align: center; }
+        .controls { margin-bottom: 20px; }
+        button { background: #007aff; color: white; border: none; padding: 14px 28px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 80%; max-width: 300px; }
         button:disabled { background: #999; }
         
-        /* 模擬卡牌選擇區 */
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px; max-width: 1000px; margin: 0 auto; }
-        .card-item { background: white; padding: 8px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); text-align: center; }
-        .card-item img { width: 100%; height: auto; border-radius: 4px; display: block; }
-        .card-item p { margin: 5px 0 0; font-size: 12px; color: #666; }
-
-        /* 隱藏的 PDF 渲染容器 (絕對不要用 display: none，否則 html2canvas 抓不到尺寸) */
-        #pdf-render-container {
-            position: absolute;
-            left: -9999px;
-            top: -9999px;
-        }
-
-        /* 精準 A4 比例與尺寸 (300 DPI 下的 A4 寬度約 2480px，這裡用比例控制即可) */
-        .pdf-page {
-            width: 210mm;
-            height: 297mm;
-            background: white;
-            position: relative;
-            box-sizing: border-box;
-            padding: 10mm; /* A4 留白 */
-            display: grid;
-            grid-template-columns: repeat(3, 63mm);
-            grid-template-rows: repeat(3, 88mm);
-            gap: 5mm; /* 卡牌間距，方便裁切 */
-            justify-content: center;
-            align-content: center;
-        }
-
-        /* 卡牌與裁切線線條設計 */
-        .pdf-card-wrapper {
-            position: relative;
-            width: 63mm;
-            height: 88mm;
-            box-sizing: border-box;
-        }
-
-        .pdf-card-wrapper img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            border-radius: 4px; /* 保留卡牌小圓角 */
-        }
-
-        /* 十字裁切線效果 (利用偽元素繪製在外圍) */
-        .pdf-card-wrapper::before, .pdf-card-wrapper::after {
-            content: "";
-            position: absolute;
-            border: 0.2mm dashed #999;
-            pointer-events: none;
-        }
-        /* 四角延伸十字線 */
-        .pdf-card-wrapper::before {
-            top: -3mm; bottom: -3mm; left: 0; right: 0;
-            border-width: 0 0.2mm;
-        }
-        .pdf-card-wrapper::after {
-            top: 0; bottom: 0; left: -3mm; right: -3mm;
-            border-width: 0.2mm 0;
-        }
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; max-width: 800px; margin: 0 auto; padding: 10px; }
+        .card-item { background: white; padding: 8px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .card-item img { width: 100%; height: auto; border-radius: 6px; display: block; }
+        .card-item p { margin: 8px 0 0; font-size: 12px; color: #666; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div class="controls">
         <button id="download-btn">產生並下載 A4 PDF</button>
-        <p style="font-size: 14px; color: #666;">（範例預設載入 10 張卡片，會自動分成 2 頁）</p>
+        <p style="font-size: 13px; color: #666;">預設載入 10 張卡片（會自動分成 2 頁）</p>
     </div>
 
-    <div class="card-grid" id="selected-cards">
-        </div>
-
-    <div id="pdf-render-container"></div>
+    <div class="card-grid" id="selected-cards"></div>
 
 <script>
-    // 模擬使用者選取的寶可夢卡牌 URL 清單 (來自官方來源)
+    // 您的卡牌來源網址
     const sampleCards = [
-        { id: '1', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' }, // 噴火龍ex
-        { id: '2', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '3', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '4', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '5', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '6', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '7', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '8', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '9', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { id: '10', url: 'https://asia.pokemon-card.com/tw/card-img/tw00004944.png' } // 多龍巴魯托ex
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00004944.png' }
     ];
 
-    // 渲染網頁 UI
+    // 渲染網頁畫面
     const grid = document.getElementById('selected-cards');
     sampleCards.forEach((card, index) => {
         grid.innerHTML += `
@@ -113,13 +53,16 @@
         `;
     });
 
-    // 核心功能：解決 Safari 跨域的圖片轉 Base64 處理器
+    // 針對 Safari 進行優化的跨域圖片轉 Base64 處理器 (改用另一組更穩定的開源代理)
     function getBase64Image(imgUrl) {
         return new Promise((resolve, reject) => {
             const img = new Image();
-            // 關鍵：強制設定為不帶憑證的跨域，部分 CDN 支援此方式
-            img.setAttribute('crossOrigin', 'anonymous'); 
-            img.src = imgUrl;
+            img.setAttribute('crossOrigin', 'anonymous');
+            
+            // 這次改用 AllOrigins 代理伺服器，它能把圖片包成 json 或是直接經由代理讀取，對 Safari 友善很多
+            // 加上隨機參數避免瀏覽器快取 (Cache) 導致的 CORS 失敗
+            img.src = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(imgUrl) + '&cache=' + Date.now();
+            
             img.onload = () => {
                 const canvas = document.createElement("canvas");
                 canvas.width = img.width;
@@ -129,20 +72,19 @@
                 resolve(canvas.toDataURL("image/png"));
             };
             img.onerror = () => {
-                // 如果官方徹底封鎖 CORS，則回退使用免費的反向代理（純前端唯一解）
-                const proxyUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(imgUrl);
-                const proxyImg = new Image();
-                proxyImg.setAttribute('crossOrigin', 'anonymous');
-                proxyImg.src = proxyUrl;
-                proxyImg.onload = () => {
+                // 備用方案：如果第一組代理也失敗，嘗試直接抓取（賭看看部分內網環境）
+                const fallbackImg = new Image();
+                fallbackImg.setAttribute('crossOrigin', 'anonymous');
+                fallbackImg.src = imgUrl + '?t=' + Date.now();
+                fallbackImg.onload = () => {
                     const canvas = document.createElement("canvas");
-                    canvas.width = proxyImg.width;
-                    canvas.height = proxyImg.height;
+                    canvas.width = fallbackImg.width;
+                    canvas.height = fallbackImg.height;
                     const ctx = canvas.getContext("2d");
-                    ctx.drawImage(proxyImg, 0, 0);
+                    ctx.drawImage(fallbackImg, 0, 0);
                     resolve(canvas.toDataURL("image/png"));
                 };
-                proxyImg.onerror = () => reject(new Error("圖片載入失敗"));
+                fallbackImg.onerror = () => reject(new Error("寶可夢官方圖片跨域下載失敗，請重新整理再試一次。"));
             };
         });
     }
@@ -151,72 +93,74 @@
     document.getElementById('download-btn').addEventListener('click', async () => {
         const btn = document.getElementById('download-btn');
         btn.disabled = true;
-        btn.innerText = '處理圖片中...';
+        btn.innerText = '圖片轉換中 (約需 5-10 秒)...';
 
         try {
-            // 1. 先將所有卡牌轉為 Base64（避免 html2canvas 跨域爆白畫面）
-            const base64Cards = [];
-            for (let card of sampleCards) {
-                const b64 = await getBase64Image(card.url);
-                base64Cards.push(b64);
-            }
-
-            btn.innerText = '正在排版 PDF...';
-            const renderContainer = document.getElementById('pdf-render-container');
-            renderContainer.innerHTML = ''; // 清空舊資料
-
-            // 2. 每 9 張卡片切成一頁 A4
-            const cardsPerPage = 9;
-            for (let i = 0; i < base64Cards.length; i += cardsPerPage) {
-                const pageData = base64Cards.slice(i, i + cardsPerPage);
-                
-                const pageEl = document.createElement('div');
-                pageEl.className = 'pdf-page';
-                
-                pageData.forEach(b64 => {
-                    pageEl.innerHTML += `
-                        <div class="pdf-card-wrapper">
-                            <img src="${b64}" />
-                        </div>
-                    `;
-                });
-                renderContainer.appendChild(pageEl);
-            }
-
-            btn.innerText = '產生 PDF 中...';
-            
-            // 3. 初始化 jsPDF (A4 尺寸，單位公釐 mm)
             const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF({
-                orientation: 'p',
-                unit: 'mm',
-                format: 'a4'
-            });
-
-            const pages = renderContainer.querySelectorAll('.pdf-page');
+            // 建立 A4 PDF 物件
+            const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
             
-            for (let index = 0; index < pages.length; index++) {
-                if (index > 0) pdf.addPage(); // 超過一頁就加新頁面
+            // A4 尺寸：210mm x 297mm
+            // 3x3 排版：卡片 63mm x 88mm
+            // 計算邊距讓卡片完美置中
+            const cardW = 63;
+            const cardH = 88;
+            const gapX = 4; // 卡片橫向間距
+            const gapY = 4; // 卡片縱向間距
+            const startX = (210 - (cardW * 3 + gapX * 2)) / 2; // 起始 X 座標
+            const startY = (297 - (cardH * 3 + gapY * 2)) / 2; // 起始 Y 座標
 
-                // 使用 html2canvas 將 DOM 轉為 Canvas，精確度調高至比率 2 (適合列印品質)
-                const canvas = await html2canvas(pages[index], {
-                    scale: 2, 
-                    useCORS: true,
-                    allowTaint: false,
-                    logging: false
-                });
+            let cardCountOnPage = 0;
 
-                const imgData = canvas.toDataURL('image/jpeg', 0.95);
-                // 將畫布完美填滿 A4 (210mm × 297mm)
-                pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+            for (let i = 0; i < sampleCards.length; i++) {
+                // 如果是新的一頁（除了第一頁以外），先加新頁面
+                if (cardCountOnPage === 9) {
+                    pdf.addPage();
+                    cardCountOnPage = 0;
+                }
+
+                btn.innerText = `正在處理第 ${i + 1}/${sampleCards.length} 張卡片...`;
+                
+                // 轉 Base64
+                const base64Data = await getBase64Image(sampleCards[i].url);
+
+                // 計算這張卡片在 3x3 網格中的欄與列
+                const col = cardCountOnPage % 3;
+                const row = Math.floor(cardCountOnPage / 3);
+                
+                const x = startX + col * (cardW + gapX);
+                const y = startY + row * (cardH + gapY);
+
+                // 1. 繪製十字裁切線 (在外圍延伸 3mm)
+                pdf.setDrawColor(150, 150, 150); // 灰色線條
+                pdf.setLineWidth(0.1);
+                
+                // 左上角十字
+                pdf.line(x - 3, y, x, y);
+                pdf.line(x, y - 3, x, y);
+                // 右上角十字
+                pdf.line(x + cardW, y, x + cardW + 3, y);
+                pdf.line(x + cardW, y - 3, x + cardW, y);
+                // 左下角十字
+                pdf.line(x - 3, y + cardH, x, y + cardH);
+                pdf.line(x, y + cardH, x, y + cardH + 3);
+                // 右下角十字
+                pdf.line(x + cardW, y + cardH, x + cardW + 3, y + cardH);
+                pdf.line(x + cardW, y + cardH, x + cardW, y + cardH + 3);
+
+                // 2. 將卡片圖片精確塞入指定的公釐 (mm) 位置
+                pdf.addImage(base64Data, 'PNG', x, y, cardW, cardH, undefined, 'FAST');
+
+                cardCountOnPage++;
             }
 
-            // 4. 觸發下載 (在 iOS Safari 會開啟新分頁或彈出下載確認)
-            pdf.save('PTCG_Deck_List.pdf');
+            btn.innerText = '正在儲存 PDF...';
+            // 輸出下載
+            pdf.save('PTCG_A4_Print.pdf');
 
         } catch (error) {
             console.error(error);
-            alert('產生失敗，請稍後再試：' + error.message);
+            alert(error.message);
         } finally {
             btn.disabled = false;
             btn.innerText = '產生並下載 A4 PDF';
