@@ -46,10 +46,10 @@
     const btn = document.getElementById('download-btn');
     const imageLoadPromises = [];
 
-    // 關鍵優化：利用 weserv.nl 鏡像服務，直接把原圖轉成允許跨域的安全圖片網址
+    // 利用 weserv.nl 鏡像服務，直接把原圖轉成允許跨域的安全圖片網址
     function getSafeCorsUrl(originalUrl) {
-        // 去掉 https:// 避免部分解析問題，並強制輸出為 png
         const cleanUrl = originalUrl.replace(/^https?:\/\//, '');
+        // 這裡一樣維持輸出 png 確保原圖畫質不受損
         return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=png`;
     }
 
@@ -59,7 +59,6 @@
         item.className = 'card-item';
         
         const img = document.createElement('img');
-        // 核心改動：畫面上預覽與後續 PDF 下載都統一改用經過代理安全封裝的網址
         const safeUrl = getSafeCorsUrl(card.url);
         
         img.crossOrigin = 'anonymous'; 
@@ -84,7 +83,7 @@
         imageLoadPromises.push(pLoad);
     });
 
-    // 圖片全部下載完畢（在畫面上看得到圖了），才解鎖下載按鈕
+    // 圖片全部下載完畢，才解鎖下載按鈕
     Promise.all(imageLoadPromises).then(() => {
         btn.disabled = false;
         btn.innerText = '產生並下載 A4 PDF';
@@ -102,7 +101,7 @@
             // 3x3 紙張排版微調
             const cardW = 63;
             const cardH = 88;
-            const gapX = 3; // 縮小一點點間距，確保邊框與裁切線不超出 A4 邊界
+            const gapX = 3; 
             const gapY = 3;
             const startX = (210 - (cardW * 3 + gapX * 2)) / 2;
             const startY = (297 - (cardH * 3 + gapY * 2)) / 2;
@@ -116,19 +115,19 @@
                     cardCountOnPage = 0;
                 }
 
-                // 將已經在網頁上安全顯示出來的 Canvas 區塊轉成 Base64
-                let base64Data;
-                try {
-                    const canvas = document.createElement("canvas");
-                    canvas.width = img.naturalWidth || 400;
-                    canvas.height = img.naturalHeight || 560;
-                    const ctx = canvas.getContext("2d");
-                    ctx.drawImage(img, 0, 0);
-                    base64Data = canvas.toDataURL("image/png");
-                } catch (e) {
-                    // 若有萬一，直接傳安全 URL 給 jsPDF 解析
-                    base64Data = img.src;
-                }
+                // 【核心修正點】：這裡強制改為導出 "image/jpeg" 格式，完全避開 PNG 損壞的嚴格檢查
+                const canvas = document.createElement("canvas");
+                canvas.width = img.naturalWidth || 400;
+                canvas.height = img.naturalHeight || 560;
+                const ctx = canvas.getContext("2d");
+                
+                // 為了防止轉 JPEG 時背景變成黑色，先鋪一層白底
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.drawImage(img, 0, 0);
+                // 轉為 0.95 畫質的 JPEG Base64
+                const base64Data = canvas.toDataURL("image/jpeg", 0.95);
 
                 const col = cardCountOnPage % 3;
                 const row = Math.floor(cardCountOnPage / 3);
@@ -145,8 +144,8 @@
                 pdf.line(x - 3, y + cardH, x, y + cardH); pdf.line(x, y + cardH, x, y + cardH + 3);
                 pdf.line(x + cardW, y + cardH, x + cardW + 3, y + cardH); pdf.line(x + cardW, y + cardH, x + cardW, y + cardH + 3);
 
-                // 塞入 PDF 中
-                pdf.addImage(base64Data, 'PNG', x, y, cardW, cardH, undefined, 'FAST');
+                // 【核心修正點】：指定格式為 'JPEG'
+                pdf.addImage(base64Data, 'JPEG', x, y, cardW, cardH, undefined, 'FAST');
                 cardCountOnPage++;
             });
 
