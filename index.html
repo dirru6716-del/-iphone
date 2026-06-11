@@ -28,39 +28,34 @@
     <div class="card-grid" id="selected-cards"></div>
 
 <script>
-    // 修正後的卡牌網址清單：第 10 張已更換為穩定的官方 assets 靜態資源庫路徑
+    // 【終極修正】：拋棄會鎖跨域的官方伺服器，改用開放且高畫質的開源 PTCG 數據庫圖源
+    // 這裡直接幫您轉換好對應的「噴火龍 ex」與「多龍巴魯托 ex (第10張)」的開源高畫質網址
     const sampleCards = [
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        // 修正：第 10 張換成官方前端靜態資源路徑，100% 抓得到圖
-        { url: 'https://asia.pokemon-card.com/tw/assets/images/card-img/tw00004944.png' }
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' }, // 噴火龍 ex
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        { url: 'https://images.pokemontcg.io/sv3ob/223_hires.png' },
+        // 👇 第 10 張：多龍巴魯托 ex (Dragapult ex)，改用開源資料庫的高畫質圖源，全球 CDN 加速且絕對不鎖跨域
+        { url: 'https://images.pokemontcg.io/sv6/130_hires.png' } 
     ];
 
     const grid = document.getElementById('selected-cards');
     const btn = document.getElementById('download-btn');
 
-    // 封裝安全跨域網址
-    function getSafeCorsUrl(originalUrl) {
-        if (!originalUrl) return '';
-        const cleanUrl = originalUrl.replace(/^https?:\/\//, '');
-        return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=png`;
-    }
-
-    // 在畫面上動態產生圖片預覽
+    // 動態生成預覽 UI
     sampleCards.forEach((card, index) => {
         const item = document.createElement('div');
         item.className = 'card-item';
         
         const img = document.createElement('img');
+        // 這些開源圖片原生自帶 Access-Control-Allow-Origin: * 標頭，不需要再套用 weserv 代理
         img.crossOrigin = 'anonymous'; 
-        img.src = getSafeCorsUrl(card.url);
+        img.src = card.url;
         img.alt = `card-${index + 1}`;
         
         img.onerror = () => {
@@ -75,27 +70,22 @@
         grid.appendChild(item);
     });
 
-    // 核心處理：將 HTML 的 <img> 轉為 Base64 (強制 JPEG)，若破圖則本地畫灰色框
+    // 將 HTML 的 <img> 轉為 Base64
     function processImageToBase64(img, labelText) {
         return new Promise((resolve) => {
-            // 防護：若圖片在 iPhone 記憶體中仍被判定未完成或無寬高，直接走灰色替代框
             if (!img || !img.complete || img.naturalWidth === 0) {
                 const canvas = document.createElement("canvas");
                 canvas.width = 400;
                 canvas.height = 560;
                 const ctx = canvas.getContext("2d");
                 
-                // 畫底色
                 ctx.fillStyle = "#EAEAEA";
                 ctx.fillRect(0, 0, 400, 560);
-                
-                // 畫內襯虛線
                 ctx.strokeStyle = "#BBBBBB";
                 ctx.lineWidth = 4;
                 ctx.setLineDash([10, 10]);
                 ctx.strokeRect(20, 20, 360, 520);
                 
-                // 寫提示文字
                 ctx.fillStyle = "#666666";
                 ctx.font = "bold 28px sans-serif";
                 ctx.textAlign = "center";
@@ -107,21 +97,18 @@
                 return;
             }
 
-            // 圖片狀態完美 -> 正常繪製並導出 JPEG
             try {
                 const canvas = document.createElement("canvas");
                 canvas.width = img.naturalWidth;
                 canvas.height = img.naturalHeight;
                 const ctx = canvas.getContext("2d");
                 
-                // 鋪白底（防止卡牌小圓角外側變成難看的黑色死格子）
                 ctx.fillStyle = "#FFFFFF";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
                 ctx.drawImage(img, 0, 0);
                 resolve(canvas.toDataURL("image/jpeg", 0.95));
             } catch (e) {
-                // 如果觸發未知跨域安全阻擋，回退傳遞原始 src
                 resolve(img.src);
             }
         });
@@ -136,7 +123,6 @@
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
             
-            // 3×3 標準 A4 卡牌列印佈局 (卡牌尺寸 63mm × 88mm)
             const cardW = 63;
             const cardH = 88;
             const gapX = 3; 
@@ -154,7 +140,6 @@
                 }
 
                 const img = imgElements[i];
-                // 處理轉換，保證得到可用的 Base64
                 const base64Data = await processImageToBase64(img, `Card - ${i + 1}`);
 
                 const col = cardCountOnPage % 3;
@@ -163,7 +148,7 @@
                 const x = startX + col * (cardW + gapX);
                 const y = startY + row * (cardH + gapY);
 
-                // 繪製精準的灰色十字裁切線 (外圍延伸 3mm，不破壞卡片本身)
+                // 繪製精準的灰色十字裁切線
                 pdf.setDrawColor(180, 180, 180);
                 pdf.setLineWidth(0.1);
                 pdf.line(x - 3, y, x, y); pdf.line(x, y - 3, x, y);
@@ -176,7 +161,6 @@
                 cardCountOnPage++;
             }
 
-            // 儲存並引導 Safari 下載 (會跳出 iOS 原生的下載確認)
             pdf.save('PTCG_A4_Print.pdf');
 
         } catch (error) {
