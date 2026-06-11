@@ -14,55 +14,59 @@
         
         .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; max-width: 800px; margin: 0 auto; padding: 10px; }
         .card-item { background: white; padding: 8px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .card-item img { width: 100%; height: auto; border-radius: 6px; display: block; }
+        .card-item img { width: 100%; height: auto; border-radius: 6px; display: block; background: #eaeaea; min-height: 195px; }
         .card-item p { margin: 8px 0 0; font-size: 12px; color: #666; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div class="controls">
-        <button id="download-btn" disabled>圖片安全載入中...</button>
+        <button id="download-btn">產生並下載 A4 PDF</button>
         <p style="font-size: 13px; color: #666;">預設載入 10 張卡片（會自動分成 2 頁）</p>
     </div>
 
     <div class="card-grid" id="selected-cards"></div>
 
 <script>
-    // 原始卡牌網址清單
+    // 測試卡牌清單 (包含測試用的各類型官方 URL)
     const sampleCards = [
+        { id: '1', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '2', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '3', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '4', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '5', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '6', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        { id: '7', url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
         { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
         { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
-        { url: 'https://asia.pokemon-card.com/tw/card-img/tw00005139.png' },
+        // 第 10 張改用更相容的官方靜態來源，或作為損壞安全防護測試
         { url: 'https://asia.pokemon-card.com/tw/card-img/tw00004944.png' }
     ];
 
     const grid = document.getElementById('selected-cards');
     const btn = document.getElementById('download-btn');
-    const imageLoadPromises = [];
 
-    // 利用 weserv.nl 鏡像服務
+    // 轉換成安全網址
     function getSafeCorsUrl(originalUrl) {
+        if (!originalUrl) return '';
         const cleanUrl = originalUrl.replace(/^https?:\/\//, '');
         return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&output=png`;
     }
 
-    // 動態生成網頁圖片
+    // 動態生成預覽 UI
     sampleCards.forEach((card, index) => {
         const item = document.createElement('div');
         item.className = 'card-item';
         
         const img = document.createElement('img');
-        const safeUrl = getSafeCorsUrl(card.url);
-        
         img.crossOrigin = 'anonymous'; 
-        img.src = safeUrl;
-        img.alt = `card-${index}`;
+        img.src = getSafeCorsUrl(card.url);
+        img.alt = `card-${index + 1}`;
+        
+        // 萬一圖片加載失敗（如第 10 張），在畫面上優化顯示，且不中斷流程
+        img.onerror = () => {
+            console.warn(`第 ${index + 1} 張圖片官方阻擋或不存在。`);
+        };
         
         const p = document.createElement('p');
         p.innerText = `第 ${index + 1} 張`;
@@ -70,45 +74,70 @@
         item.appendChild(img);
         item.appendChild(p);
         grid.appendChild(item);
+    });
 
-        // 【核心修正點】：利用 img.decode() 確保 Safari 硬體層面完全解碼成功
-        const pLoad = new Promise((resolve) => {
-            img.onload = () => {
-                // onload 觸發後，進一步確保 decode 成功
-                img.decode()
-                    .then(() => resolve(true))
-                    .catch((err) => {
-                        console.warn(`第 ${index + 1} 張解碼異常，嘗試等待`, err);
-                        resolve(false);
-                    });
-            };
-            img.onerror = () => {
-                console.error(`第 ${index + 1} 張圖片下載失敗`);
-                resolve(false);
-            };
+    // 核心安全轉換：利用 Canvas 導出 JPEG，若圖片破圖則自動繪製精美替代框，100% 不崩潰
+    function processImageToBase64(img, labelText) {
+        return new Promise((resolve) => {
+            // 檢查圖片是否真的可用
+            if (!img || !img.complete || img.naturalWidth === 0) {
+                // 圖片壞了 (Broken) -> 瞬間畫一個同等尺寸的灰色預位框
+                const canvas = document.createElement("canvas");
+                canvas.width = 400;
+                canvas.height = 560;
+                const ctx = canvas.getContext("2d");
+                
+                // 畫灰色底盤
+                ctx.fillStyle = "#EAEAEA";
+                ctx.fillRect(0, 0, 400, 560);
+                
+                // 畫內襯虛線
+                ctx.strokeStyle = "#BBBBBB";
+                ctx.lineWidth = 4;
+                ctx.setLineDash([10, 10]);
+                ctx.strokeRect(20, 20, 360, 520);
+                
+                // 寫上提示字樣
+                ctx.fillStyle = "#666666";
+                ctx.font = "bold 28px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText(labelText, 200, 260);
+                ctx.font = "20px sans-serif";
+                ctx.fillText("(圖片載入失敗)", 200, 300);
+                
+                resolve(canvas.toDataURL("image/jpeg", 0.8));
+                return;
+            }
+
+            // 圖片正常 -> 正常解碼轉換
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext("2d");
+                
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+                
+                resolve(canvas.toDataURL("image/jpeg", 0.95));
+            } catch (e) {
+                // 萬一因跨域政策被污染 (Tainted)
+                resolve(img.src);
+            }
         });
-        imageLoadPromises.push(pLoad);
-    });
-
-    // 所有圖片均已「完全下載且完全解碼」後才啟用按鈕
-    Promise.all(imageLoadPromises).then(() => {
-        // 再額外延遲 300 毫秒給 Safari 緩衝執行緒，確保萬無一失
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.innerText = '產生並下載 A4 PDF';
-        }, 300);
-    });
+    }
 
     // 點擊按鈕生成 PDF
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
         btn.disabled = true;
-        btn.innerText = '正在處理 PDF 排版...';
+        btn.innerText = '正在輸出 PDF 排版...';
 
         try {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
             
-            // 3x3 紙張排版
+            // 3x3 標準列印佈局
             const cardW = 63;
             const cardH = 88;
             const gapX = 3; 
@@ -119,25 +148,15 @@
             const imgElements = grid.querySelectorAll('img');
             let cardCountOnPage = 0;
 
-            imgElements.forEach((img, i) => {
+            for (let i = 0; i < imgElements.length; i++) {
                 if (cardCountOnPage === 9) {
                     pdf.addPage();
                     cardCountOnPage = 0;
                 }
 
-                // 建立畫布轉成穩定的 JPEG Base64
-                const canvas = document.createElement("canvas");
-                // 安全防護：如果長寬抓不到，給予預設 PTCG 比例尺寸
-                canvas.width = img.naturalWidth || 400;
-                canvas.height = img.naturalHeight || 560;
-                const ctx = canvas.getContext("2d");
-                
-                // 鋪一層白底防止黑邊
-                ctx.fillStyle = "#FFFFFF";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.drawImage(img, 0, 0);
-                const base64Data = canvas.toDataURL("image/jpeg", 0.95);
+                const img = imgElements[i];
+                // 呼叫安全轉換機制，破圖自動變灰色格，絕不丟出例外
+                const base64Data = await processImageToBase64(img, `Card - ${i + 1}`);
 
                 const col = cardCountOnPage % 3;
                 const row = Math.floor(cardCountOnPage / 3);
@@ -145,21 +164,19 @@
                 const x = startX + col * (cardW + gapX);
                 const y = startY + row * (cardH + gapY);
 
-                // 繪製灰色十字裁切線
+                // 繪製裁切十字線
                 pdf.setDrawColor(180, 180, 180);
                 pdf.setLineWidth(0.1);
-                
                 pdf.line(x - 3, y, x, y); pdf.line(x, y - 3, x, y);
                 pdf.line(x + cardW, y, x + cardW + 3, y); pdf.line(x + cardW, y - 3, x + cardW, y);
                 pdf.line(x - 3, y + cardH, x, y + cardH); pdf.line(x, y + cardH, x, y + cardH + 3);
                 pdf.line(x + cardW, y + cardH, x + cardW + 3, y + cardH); pdf.line(x + cardW, y + cardH, x + cardW, y + cardH + 3);
 
-                // 插入 JPEG 到 PDF
+                // 塞入 PDF
                 pdf.addImage(base64Data, 'JPEG', x, y, cardW, cardH, undefined, 'FAST');
                 cardCountOnPage++;
-            });
+            }
 
-            // 輸出下載
             pdf.save('PTCG_A4_Print.pdf');
 
         } catch (error) {
